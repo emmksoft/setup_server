@@ -9,10 +9,12 @@ DIRECTUS_PORT=8055 # Port interne de Directus
 
 # MySQL User & DB
 MYSQL_DB_NAME="mksoft_db"
+# MYSQL_ROOT_PASSWORD sera défini dynamiquement lors de l'étape 4
+# MYSQL_USER et MYSQL_PASSWORD seront définis dynamiquement lors de l'étape 4
 
 # Samba User & Share (sera demandé à l'utilisateur)
 SAMBA_SHARE_NAME="shared_data"
-SAMBA_SHARE_PATH="/srv/$SAMBA_SHARE_NAME" # Chemin du partage Samba
+SAMBA_SHARE_PATH="/srv/$SAMBA_SHARE_NAME" # Chemin du partage Samba (corrigé ici : utilisez SAMBA_SHARE_NAME, pas SAMBA_SHARE_PATH)
 
 # --- Fonction pour afficher les messages d'erreur et quitter ---
 function exit_on_error {
@@ -46,7 +48,7 @@ function get_password {
 }
 
 # --- EXPORTER LES FONCTIONS POUR LES SOUS-SHELLS ---
-# Ceci est CRUCIAL pour que les fonctions soient accessibles dans le 'sudo -u ... bash -c'
+# Cela peut aider dans certains contextes, mais la redéfinition directe est plus sûre pour 'bash -c'
 export -f exit_on_error
 export -f check_status
 export -f get_password
@@ -120,7 +122,6 @@ else
 fi
 
 echo -e "\e[32mÉtape 1 terminée: Configuration initiale du serveur.\e[0m"
-
 
 # --- 2. Installation et configuration de Nginx ---
 echo -e "\n--- Étape 2: Installation et configuration de Nginx ---"
@@ -210,7 +211,6 @@ fi
 
 echo -e "\e[32mÉtape 2 terminée: Nginx installé et configuré.\e[0m"
 
-
 # --- 3. Installation et vérification de Node.js 22 ---
 echo -e "\n--- Étape 3: Installation et vérification de Node.js 22 ---"
 
@@ -261,7 +261,6 @@ fi
 check_status "La vérification finale des versions Node.js/NPM a échoué." "Versions Node.js/NPM vérifiées."
 
 echo -e "\e[32mÉtape 3 terminée: Node.js 22 et npm installés et vérifiés.\e[0m"
-
 
 # --- 4. Installation et configuration de MySQL ---
 echo -e "\n--- Étape 4: Installation et configuration de MySQL ---"
@@ -355,9 +354,8 @@ check_status "La configuration de l'utilisateur/DB MySQL a échoué." "Utilisate
 
 echo -e "\e[32mÉtape 4 terminée: MySQL installé et configuré.\e[0m"
 
-
 # --- Installation et configuration de Samba ---
-echo -e "\n--- Étape: Installation et configuration de Samba ---"
+echo -e "\n--- Étape 5: Installation et configuration de Samba ---"
 echo "Vérification et installation de Samba..."
 if ! dpkg -s samba &>/dev/null; then
     apt install -y samba || exit_on_error "Échec de l'installation de Samba."
@@ -412,9 +410,8 @@ check_status "Le redémarrage de Samba a échoué." "Samba redémarré."
 
 echo -e "\e[32mInstallation et configuration de Samba terminées.\e[0m"
 
-
-# --- 5. Création du projet Directus ---
-echo -e "\n--- Étape 5: Création du projet Directus ---"
+# --- 6. Création du projet Directus ---
+echo -e "\n--- Étape 6: Création du projet Directus ---"
 
 echo "Création du dossier d'installation Directus: $DIRECTUS_INSTALL_PATH..."
 if [ ! -d "$DIRECTUS_INSTALL_PATH" ]; then
@@ -426,18 +423,37 @@ fi
 chown -R "$DIRECTUS_RUN_USER":"$DIRECTUS_RUN_USER" "$DIRECTUS_INSTALL_PATH"
 chmod -R 755 "$DIRECTUS_INSTALL_PATH"
 
-# Exporter les variables nécessaires au sous-shell pour Directus
-export MYSQL_USER
-export MYSQL_PASSWORD
-export MYSQL_DB_NAME
-export DIRECTUS_PORT
-export NGINX_SERVER_NAME # Pour URL_PUBLIC si décommenté
-export DIRECTUS_INSTALL_PATH # Nécessaire pour le sous-shell
-export DIRECTUS_BIN # Pour s'assurer que c'est bien le binaire local
-export CALLING_USER # Pour get_password si utilisé dans le sous-shell
-
 # Exécuter les commandes npm/directus en tant que DIRECTUS_RUN_USER
-sudo -u "$DIRECTUS_RUN_USER" bash -c "
+# Nous devons redéfinir les fonctions essentielles et passer les variables via ENV
+sudo -u "<span class="math-inline">DIRECTUS\_RUN\_USER" bash \-c "
+\# \-\-\- Redéfinir les fonctions dans ce sous\-shell \-\-\-
+function exit\_on\_error \{
+echo \-e \\"\\\\\\\\n\\\\\\\\e\[31mERREUR\: \\$1\\\\\\\\e\[0m\\" \# Texte rouge
+exit 1
+\}
+function check\_status \{
+if \[ \\</span>? -ne 0 ]; then
+            exit_on_error \"\$1\"
+        else
+            echo -e \"\\\\e[32mOK: \$2\\\\e[0m\" # Texte vert
+        fi
+    }
+
+    function get_password {
+        local prompt_msg=\"\$1\"
+        local password_var=\"\$2\"
+        while true; do
+            read -sp \"\$prompt_msg: \" entered_password
+            echo
+            if [[ -n \"\$entered_password\" ]]; then
+                eval \"\$password_var='\$entered_password'\"
+                break
+            else
+                echo -e \"\\\\e[31mLe mot de passe ne peut pas être vide. Veuillez réessayer.\\\\e[0m\"
+            fi
+        done
+    }
+
     echo 'Déplacement vers le dossier Directus...'
     cd \"$DIRECTUS_INSTALL_PATH\" || exit_on_error \"Échec du déplacement vers le dossier Directus.\"
 
@@ -453,30 +469,30 @@ sudo -u "$DIRECTUS_RUN_USER" bash -c "
         exit_on_error \"L'exécutable Directus CLI n'a pas été trouvé à \$DIRECTUS_BIN.\"
     fi
 
-    echo 'Vérification de l'initialisation du projet Directus...'
+    echo 'Vérification de l\'initialisation du projet Directus...'
     if [ ! -f \"\$DIRECTUS_INSTALL_PATH/.env\" ]; then
-        echo 'Le fichier .env de Directus n'existe pas. Initialisation du projet...'
+        echo 'Le fichier .env de Directus n\'existe pas. Initialisation du projet...'
         
         # Demander les emails/mots de passe de l'administrateur Directus
-        # On utilise directement les fonctions exportées du shell parent
+        # Ces variables sont ensuite utilisées pour définir les variables d'environnement pour Directus
         get_password \"Veuillez entrer l'email de l'administrateur Directus\" DIRECTUS_ADMIN_EMAIL_INNER
         get_password \"Veuillez entrer le mot de passe de l'administrateur Directus\" DIRECTUS_ADMIN_PASSWORD_INNER
 
-        # Configuration des variables d'environnement pour l'installation Directus
+        # Exporter les variables d'environnement nécessaires pour directus init et bootstrap
         export DB_CLIENT=\"mysql\"
         export DB_HOST=\"localhost\"
         export DB_PORT=\"3306\"
-        export DB_USER=\"\$MYSQL_USER\"
-        export DB_PASSWORD=\"\$MYSQL_PASSWORD\"
-        export DB_DATABASE=\"\$MYSQL_DB_NAME\"
-        export ADMIN_EMAIL=\"\$DIRECTUS_ADMIN_EMAIL_INNER\"
-        export ADMIN_PASSWORD=\"\$DIRECTUS_ADMIN_PASSWORD_INNER\"
-
-        # Générer une clé et un secret aléatoires pour Directus
-        export KEY=\$(openssl rand -base64 32)
-        export SECRET=\$(openssl rand -base64 32)
+        export DB_USER=\"$MYSQL_USER\" # Propagé du shell parent
+        export DB_PASSWORD=\"$MYSQL_PASSWORD\" # Propagé du shell parent
+        export DB_DATABASE=\"<span class="math-inline">MYSQL\_DB\_NAME\\" \# Propagé du shell parent
+export ADMIN\_EMAIL\=\\"\\$DIRECTUS\_ADMIN\_EMAIL\_INNER\\"
+export ADMIN\_PASSWORD\=\\"\\$DIRECTUS\_ADMIN\_PASSWORD\_INNER\\"
+\# Générer une clé et un secret aléatoires pour Directus
+export KEY\=\\$\(openssl rand \-base64 32\)
+export SECRET\=\\</span>(openssl rand -base64 32)
 
         echo 'Exécution de 'directus init' pour créer le projet...'
+        # 'directus init' et 'directus bootstrap' liront les variables d'environnement exportées
         \$DIRECTUS_BIN init || exit_on_error \"Échec de l'initialisation du projet Directus.\"
 
         echo 'Exécution de 'directus bootstrap' pour configurer la base de données et l'administrateur...'
@@ -484,19 +500,20 @@ sudo -u "$DIRECTUS_RUN_USER" bash -c "
 
         echo 'Création du fichier .env pour Directus...'
         # Utiliser printf pour construire le fichier .env de manière plus robuste
-        printf "DB_CLIENT=\"%s\"\n" "\$DB_CLIENT" > \"\$DIRECTUS_INSTALL_PATH/.env\"
-        printf "DB_HOST=\"%s\"\n" "\$DB_HOST" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
-        printf "DB_PORT=\"%s\"\n" "\$DB_PORT" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
-        printf "DB_USER=\"%s\"\n" "\$DB_USER" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
-        printf "DB_PASSWORD=\"%s\"\n" "\$DB_PASSWORD" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
-        printf "DB_DATABASE=\"%s\"\n" "\$DB_DATABASE" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
-        printf "ADMIN_EMAIL=\"%s\"\n" "\$ADMIN_EMAIL" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
-        printf "ADMIN_PASSWORD=\"%s\"\n" "\$ADMIN_PASSWORD" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
-        printf "KEY=\"%s\"\n" "\$KEY" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
-        printf "SECRET=\"%s\"\n" "\$SECRET" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
-        printf "PORT=%s\n" "\$DIRECTUS_PORT" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
-        printf "NODE_ENV=production\n" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
-        # printf "URL_PUBLIC=http://%s/directus\n" "\$NGINX_SERVER_NAME" >> \"\$DIRECTUS_INSTALL_PATH/.env\" # Commenté comme dans votre script
+        # Les variables ici sont celles qui ont été exportées ci-dessus dans le sous-shell
+        printf "DB_CLIENT=\"%s\"\\n" "\$DB_CLIENT" > \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "DB_HOST=\"%s\"\\n" "\$DB_HOST" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "DB_PORT=\"%s\"\\n" "\$DB_PORT" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "DB_USER=\"%s\"\\n" "\$DB_USER" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "DB_PASSWORD=\"%s\"\\n" "\$DB_PASSWORD" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "DB_DATABASE=\"%s\"\\n" "\$DB_DATABASE" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "ADMIN_EMAIL=\"%s\"\\n" "\$ADMIN_EMAIL" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "ADMIN_PASSWORD=\"%s\"\\n" "\$ADMIN_PASSWORD" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "KEY=\"%s\"\\n" "\$KEY" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "SECRET=\"%s\"\\n" "\$SECRET" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "PORT=%s\\n" "$DIRECTUS_PORT" >> \"\$DIRECTUS_INSTALL_PATH/.env\" # Directus Port from parent shell
+        printf "NODE_ENV=production\\n" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        # printf "URL_PUBLIC=http://%s/directus\\n" "$NGINX_SERVER_NAME" >> \"\$DIRECTUS_INSTALL_PATH/.env\" # Nginx Server Name from parent shell
         
         # S'assurer que le fichier .env a les bonnes permissions (lecture/écriture pour le propriétaire uniquement)
         chmod 600 \"\$DIRECTUS_INSTALL_PATH/.env\"
@@ -514,21 +531,16 @@ if ! ufw status | grep -q "$DIRECTUS_PORT"; then
     ufw allow "$DIRECTUS_PORT"/tcp || exit_on_error "Échec de l'autorisation du port Directus sur UFW."
     check_status "L'autorisation du port Directus a échoué." "Port Directus autorisé sur UFW."
 else
-    echo "Règle pour le port Directus ($DIRECTUS_PORT) déjà présente dans UFW."
+    echo "Règle pour le port Directus (<span class="math-inline">DIRECTUS\_PORT\) déjà présente dans UFW\."
 fi
-
-echo -e "\e[32mÉtape 5 terminée: Projet Directus créé et configuré.\e[0m"
-
-
-# --- 6. Création d'un service Systemd pour Directus ---
-echo -e "\n--- Étape 6: Création d'un service Systemd pour Directus ---"
-
-DIRECTUS_SERVICE_FILE="/etc/systemd/system/directus.service"
-
-echo "Vérification du fichier de service Systemd pour Directus..."
-# Vérifier si le service existe et si son contenu est conforme
-CURRENT_SERVICE_HASH=$(md5sum "$DIRECTUS_SERVICE_FILE" 2>/dev/null | awk '{print $1}')
-EXPECTED_SERVICE_CONTENT=$(cat <<EOL
+echo \-e "\\e\[32mÉtape 6 terminée\: Projet Directus créé et configuré\.\\e\[0m"
+\# \-\-\- 7\. Création d'un service Systemd pour Directus \-\-\-
+echo \-e "\\n\-\-\- Étape 7\: Création d'un service Systemd pour Directus \-\-\-"
+DIRECTUS\_SERVICE\_FILE\="/etc/systemd/system/directus\.service"
+echo "Vérification du fichier de service Systemd pour Directus\.\.\."
+\# Vérifier si le service existe et si son contenu est conforme
+CURRENT\_SERVICE\_HASH\=</span>(md5sum "$DIRECTUS_SERVICE_FILE" 2>/dev/null | awk '{print <span class="math-inline">1\}'\)
+EXPECTED\_SERVICE\_CONTENT\=</span>(cat <<EOL
 [Unit]
 Description=Directus API
 After=network.target mysql.service
@@ -538,164 +550,21 @@ Type=simple
 User=$DIRECTUS_RUN_USER
 Group=$DIRECTUS_RUN_USER
 WorkingDirectory=$DIRECTUS_INSTALL_PATH
-EnvironmentFile=$DIRECTUS_INSTALL_PATH/.env
-ExecStart=/usr/bin/npm run start # Assurez-vous que 'npm run start' est défini dans package.json de Directus
-Restart=always
-RestartSec=10
-StandardOutput=syslog
-StandardError=syslog
-SyslogIdentifier=directus
-
-[Install]
-WantedBy=multi-user.target
+EnvironmentFile=<span class="math-inline">DIRECTUS\_INSTALL\_PATH/\.env
+ExecStart\=/usr/bin/npm run start \# Assurez\-vous que 'npm run start' est défini dans package\.json de Directus
+Restart\=always
+RestartSec\=10
+StandardOutput\=syslog
+StandardError\=syslog
+SyslogIdentifier\=directus
+\[Install\]
+WantedBy\=multi\-user\.target
 EOL
-)
-EXPECTED_SERVICE_HASH=$(echo "$EXPECTED_SERVICE_CONTENT" | md5sum | awk '{print $1}')
+\)
+EXPECTED\_SERVICE\_HASH\=</span>(echo "$EXPECTED_SERVICE_CONTENT" | md5sum | awk '{print $1}')
 
 if [ ! -f "$DIRECTUS_SERVICE_FILE" ] || [ "$CURRENT_SERVICE_HASH" != "$EXPECTED_SERVICE_HASH" ]; then
     echo "Le fichier de service Systemd pour Directus n'existe pas ou son contenu est différent. Création/Mise à jour..."
     echo "$EXPECTED_SERVICE_CONTENT" > "$DIRECTUS_SERVICE_FILE" || exit_on_error "Échec de la création du fichier de service Systemd."
     check_status "La création du fichier de service Systemd a échoué." "Fichier de service Systemd Directus créé/mis à jour."
 else
-    echo "Fichier de service Systemd Directus ($DIRECTUS_SERVICE_FILE) déjà correct."
-fi
-
-echo "Rechargement des configurations Systemd..."
-systemctl daemon-reload || exit_on_error "Échec du rechargement des daemons Systemd."
-check_status "Le rechargement des daemons Systemd a échoué." "Configurations Systemd rechargées."
-
-echo "Activation du service Directus pour qu'il démarre automatiquement au boot..."
-systemctl enable directus || exit_on_error "Échec de l'activation du service Directus."
-check_status "L'activation du service Directus a échoué." "Service Directus activé au démarrage."
-
-echo "Démarrage du service Directus..."
-systemctl start directus || exit_on_error "Échec du démarrage du service Directus."
-check_status "Le démarrage du service Directus a échoué." "Service Directus démarré."
-
-echo "Vérification de l'état du service Directus (attendez quelques secondes)..."
-sleep 10 # Laisser le temps au service de démarrer
-if ! systemctl status directus | grep -q "Active: active (running)"; then
-    exit_on_error "Le service Directus n'est pas en cours d'exécution."
-fi
-check_status "Le service Directus n'est pas en cours d'exécution." "Service Directus en cours d'exécution."
-
-echo -e "\e[32mÉtape 6 terminée: Service Directus créé et démarré.\e[0m"
-
-
-# --- 7. Configuration Nginx en Reverse Proxy pour Directus (avec support multi-sites) ---
-echo -e "\n--- Étape 7: Configuration Nginx en Reverse Proxy pour Directus ---"
-
-NGINX_DIRECTUS_CONF_PATH="/etc/nginx/sites-available/$DIRECTUS_PROJECT_NAME"
-
-echo "Vérification du fichier de configuration Nginx Reverse Proxy pour Directus..."
-# Vérifier si le fichier existe et si son contenu est conforme
-CURRENT_DIRECTUS_NGINX_HASH=$(md5sum "$NGINX_DIRECTUS_CONF_PATH" 2>/dev/null | awk '{print $1}')
-EXPECTED_DIRECTUS_NGINX_CONTENT=$(cat <<EOL
-server {
-    listen 80;
-    listen [::]:80;
-
-    server_name $NGINX_SERVER_NAME; # Accès via le nom d'hôte principal
-
-    # Configuration pour le site par défaut (si d'autres sites sont hébergés)
-    location / {
-        root /var/www/$NGINX_SERVER_NAME; # Laisser le root pour le site par défaut
-        index index.html index.htm index.nginx-debian.html;
-    }
-
-    # Configuration du reverse proxy pour Directus sur le chemin /directus
-    location /directus {
-        proxy_pass http://localhost:$DIRECTUS_PORT;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_buffering off;
-        proxy_request_buffering off;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
-EOL
-)
-EXPECTED_DIRECTUS_NGINX_HASH=$(echo "$EXPECTED_DIRECTUS_NGINX_CONTENT" | md5sum | awk '{print $1}')
-
-if [ ! -f "$NGINX_DIRECTUS_CONF_PATH" ] || [ "$CURRENT_DIRECTUS_NGINX_HASH" != "$EXPECTED_DIRECTUS_NGINX_HASH" ]; then
-    echo "Le fichier de configuration Nginx pour Directus n'existe pas ou son contenu est différent. Création/Mise à jour..."
-    echo "$EXPECTED_DIRECTUS_NGINX_CONTENT" > "$NGINX_DIRECTUS_CONF_PATH" || exit_on_error "Échec de la création du fichier de configuration Nginx pour Directus."
-    check_status "La création du fichier de configuration Nginx pour Directus a échoué." "Fichier de configuration Nginx pour Directus créé/mis à jour."
-else
-    echo "Fichier de configuration Nginx pour Directus ($NGINX_DIRECTUS_CONF_PATH) déjà correct."
-fi
-
-echo "Création d'un lien symbolique pour le site Directus..."
-if [ ! -L "/etc/nginx/sites-enabled/$DIRECTUS_PROJECT_NAME" ]; then
-    ln -sf "$NGINX_DIRECTUS_CONF_PATH" "/etc/nginx/sites-enabled/" || exit_on_error "Échec de la création du lien symbolique Nginx pour Directus."
-    check_status "La création du lien symbolique Nginx pour Directus a échoué." "Lien symbolique Nginx pour Directus créé."
-else
-    echo "Lien symbolique Nginx pour Directus déjà présent."
-fi
-
-echo "Vérification de la syntaxe de configuration Nginx et redémarrage..."
-nginx -t || exit_on_error "Erreur de syntaxe dans la configuration Nginx."
-systemctl restart nginx || exit_on_error "Échec du redémarrage de Nginx."
-check_status "La configuration/redémarrage de Nginx a échoué." "Nginx configuré en reverse proxy et redémarré."
-
-echo -e "\e[32mÉtape 7 terminée: Nginx configuré en reverse proxy pour Directus.\e[0m"
-
-
-# --- Remarque sur la 7ème remarque (Persistance de KEY et SECRET) ---
-echo -e "\n--- Remarque 7: Gestion des clés Directus ---"
-echo "Votre 7ème remarque concernait la persistance des clés KEY et SECRET de Directus."
-echo "Actuellement, ces clés sont générées aléatoirement à chaque exécution du script"
-echo "et sont stockées dans le fichier '.env' de votre projet Directus."
-echo "Cela signifie que si vous réexécutez le script, de nouvelles clés seront générées,"
-echo "ce qui invalidera les sessions utilisateur et les tokens d'authentification existants."
-echo "Pour un environnement de production stable, cela n'est pas idéal."
-
-echo "Solutions possibles pour la production (non implémentées automatiquement ici) :"
-echo "1.  \e[1mGénération unique et persistance manuelle :\e[0m Générez les clés une seule fois,"
-echo "    sauvegardez-les dans un endroit sûr (hors du serveur si possible, ou dans un gestionnaire de secrets),"
-echo "    et configurez-les manuellement dans le fichier '.env' de Directus (ou via des variables d'environnement)."
-echo "    Si vous devez réexécuter le script d'installation, assurez-vous de ne pas regénérer ces clés"
-echo "    ou de reconfigurer les anciennes si elles sont importantes pour la persistance des sessions."
-echo "2.  \e[1mVariables d'environnement du système :\e[0m Au lieu de les stocker dans le .env,"
-echo "    vous pouvez les définir comme variables d'environnement au niveau du système"
-echo "    (par exemple, dans \`/etc/environment\` ou via Systemd dans le service Directus)."
-echo "    Ceci est plus sécurisé que de les laisser dans un fichier lisible par tous."
-echo "3.  \e[1mGestionnaire de secrets :\e[0m Pour des déploiements plus complexes, utilisez des outils"
-echo "    comme HashiCorp Vault ou Kubernetes Secrets pour gérer ces clés."
-echo ""
-echo "Pour ce script, la génération aléatoire et l'écriture dans .env restent pour la commodité"
-echo "d'une première installation, mais soyez conscient de l'impact en cas de réexécution."
-echo -e "\e[32mRemarque 7 traitée.\e[0m"
-
-
-echo -e "\n\e[35m--------------------------------------------------------\e[0m"
-echo -e "\e[35mInstallation et configuration complètes !\e[0m"
-echo -e "\e[35m--------------------------------------------------------\e[0m"
-echo "Récapitulatif :"
-echo "  - Nginx est configuré pour servir le contenu depuis $NGINX_ROOT_DIR"
-echo "  - Votre site web par défaut est accessible via HTTP sur http://$NGINX_SERVER_NAME/"
-echo "  - Node.js 22 est installé."
-echo "  - MySQL est installé, sécurisé via des requêtes SQL directes,"
-echo "    avec l'utilisateur '$MYSQL_USER' et la base de données '$MYSQL_DB_NAME'."
-echo "  - Samba est configuré. Partage '$SAMBA_SHARE_NAME' sur '$SAMBA_SHARE_PATH'."
-echo "    Accès via l'utilisateur système '$CALLING_USER'."
-echo "  - Directus est installé localement à $DIRECTUS_INSTALL_PATH et s'exécute en tant que service."
-echo "  - Le service Directus est démarré et s'exécutera automatiquement au boot,"
-echo "    exécuté par l'utilisateur système '$DIRECTUS_RUN_USER'."
-echo "  - Nginx est configuré en reverse proxy. Votre Directus est accessible via :"
-echo "    \e[1mhttp://$NGINX_SERVER_NAME/directus\e[0m"
-echo "  - Les identifiants Directus Admin sont: Email: \$DIRECTUS_ADMIN_EMAIL_INNER (demandé pendant l'installation), Mot de passe: \$DIRECTUS_ADMIN_PASSWORD_INNER (demandé pendant l'installation)"
-echo -e "\n\e[31mIMPORTANT: Changez IMMÉDIATEMENT les mots de passe par défaut pour MySQL et Directus en production !\e[0m"
-echo "  Pour MySQL : mysql -u $MYSQL_USER -p"
-echo "  Pour Directus : Connectez-vous à l'admin et modifiez le mot de passe."
-echo "  Sécurisez également les permissions sur le fichier .env de Directus."
-echo -e "\nPour vérifier l'état des services:"
-echo "  sudo systemctl status nginx"
-echo "  sudo systemctl status mysql"
-echo "  sudo systemctl status directus"
-echo "  sudo systemctl status smbd nmbd"
-echo "  sudo ufw status verbose"
-echo "Pour accéder au partage Samba depuis un client Windows: \\\\$NGINX_SERVER_NAME\\$SAMBA_SHARE_NAME"
