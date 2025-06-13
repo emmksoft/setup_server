@@ -1,6 +1,6 @@
 # Guide de Déploiement Directus sur Ubuntu 22.04 LTS
 
-Ce dépôt contient un script Bash (`full_setup.sh`) conçu pour automatiser l'installation et la configuration de **Nginx**, **Node.js 22**, **MySQL**, **Samba**, et **Directus** sur un serveur **Ubuntu 22.04 LTS**.
+Ce dépôt contient un script Bash (`full_setup.sh`) conçu pour automatiser l'installation et la configuration de **Nginx**, **Node.js 22**, **MySQL**, **Samba**, et **Directus** sur un serveur **Ubuntu 22.04 LTS**. Le script inclut des vérifications pour les composants déjà installés et met à jour `npm` avant d'installer Directus localement via la CLI.
 
 ---
 
@@ -22,7 +22,7 @@ Ce dépôt contient un script Bash (`full_setup.sh`) conçu pour automatiser l'i
 
 ## 1. Introduction
 
-Ce script est un outil d'automatisation puissant qui simplifie le déploiement d'un environnement de développement ou de production pour Directus. Il intègre les meilleures pratiques de configuration, y compris la gestion des utilisateurs, la configuration du pare-feu (`UFW`), et la mise en place d'un serveur web Nginx avec reverse proxy. Pour une sécurité accrue, il demande les mots de passe et autres informations sensibles de manière interactive.
+Ce script est un outil d'automatisation puissant qui simplifie le déploiement d'un environnement de développement ou de production pour Directus. Il intègre les meilleures pratiques de configuration, y compris la gestion des utilisateurs, la configuration du pare-feu (`UFW`), et la mise en place d'un serveur web Nginx avec reverse proxy. Pour une sécurité accrue, il demande les mots de passe et autres informations sensibles de manière interactive. Une nouvelle fonctionnalité de vérification permet au script de détecter et d'adapter son comportement si certains composants sont déjà installés sur le système.
 
 ---
 
@@ -30,16 +30,16 @@ Ce script est un outil d'automatisation puissant qui simplifie le déploiement d
 
 Le script `full_setup.sh` réalise les opérations suivantes :
 
-* **Vérification des Prérequis :** S'assure que l'utilisateur exécutant le script dispose des privilèges `sudo`.
+* **Vérification des Prérequis et Composants Existants :** S'assure que l'utilisateur exécutant le script dispose des privilèges `sudo`. Avant chaque installation majeure, il vérifie si le composant (Nginx, MySQL, Samba, Node.js, etc.) est déjà installé. Si c'est le cas, il passe à la configuration ou à la mise à jour si nécessaire, évitant ainsi des installations redondantes.
 * **Mise à jour Système :** Met à jour les listes de paquets et les paquets installés.
-* **Installation d'Outils Essentiels :** Installe `curl`, `git`, `rsync`, `ufw`, `openssl` et `expect`.
+* **Installation d'Outils Essentiels :** Installe `curl`, `git`, `rsync`, `ufw`, `openssl`, `expect` et **`dos2unix`** (utilisé pour convertir les fichiers de script).
 * **Configuration de `UFW` (Uncomplicated Firewall) :** Active le pare-feu et autorise les connexions SSH, HTTP, HTTPS, et le port interne de Directus.
 * **Installation et Configuration de Nginx :**
     * Installe Nginx et l'active au démarrage.
     * Crée une racine de site par défaut (`/var/www/NOM_HOTE_SERVEUR`).
     * Configure un `server block` Nginx utilisant le **nom d'hôte** du serveur comme `server_name`.
     * Met en place un **reverse proxy** pour Directus accessible via le chemin `/directus` (ex: `http://NOM_HOTE_SERVEUR/directus`), tout en permettant l'hébergement d'autres sites à la racine du domaine ou sur d'autres chemins.
-* **Installation et vérification de Node.js 22 :** Ajoute le dépôt NodeSource et installe Node.js version 22 et `npm`. Le script vérifie si Node.js est déjà présent et à la bonne version, et effectue une mise à jour ou une installation si nécessaire.
+* **Installation et vérification de Node.js 22 :** Ajoute le dépôt NodeSource et installe Node.js version 22 et `npm`. Le script vérifie si Node.js est déjà présent et à la bonne version, et effectue une mise à jour ou une installation si nécessaire. Il procède également à la **mise à jour globale de `npm`** à sa dernière version.
 * **Installation et Configuration de MySQL Server :**
     * Installe MySQL Server et l'active au démarrage.
     * **Automatise `mysql_secure_installation` :** Exécute les étapes de sécurisation par défaut.
@@ -51,7 +51,7 @@ Le script `full_setup.sh` réalise les opérations suivantes :
     * Configure un partage Samba accessible par l'utilisateur exécutant le script et demande son **mot de passe Samba**.
 * **Installation et Configuration de Directus :**
     * Crée le dossier d'installation Directus (`/var/www/directus_mksoft`).
-    * Installe Directus CLI globalement.
+    * Installe **Directus CLI localement** dans le projet (non globalement).
     * Demande l'**e-mail** et le **mot de passe** de l'administrateur Directus.
     * Initialise et "bootstrappe" le projet Directus, en configurant la connexion à la base de données MySQL.
     * Génère des clés `KEY` et `SECRET` aléatoires et les stocke dans le fichier `.env` de Directus.
@@ -84,9 +84,9 @@ Avant d'exécuter le script, assurez-vous que :
     ```bash
     sudo apt update && sudo apt upgrade -y
     ```
-3.  **Installez `curl`** si ce n'est pas déjà fait (le script en a besoin pour télécharger d'autres éléments) :
+3.  **Installez `curl` et `dos2unix`** si ce n'est pas déjà fait :
     ```bash
-    sudo apt install -y curl
+    sudo apt install -y curl dos2unix
     ```
 
 ### Étape 2: Téléchargement du Script
@@ -99,11 +99,17 @@ Avant d'exécuter le script, assurez-vous que :
     **N'oubliez pas de remplacer `votre_utilisateur` et `votre_depot` par les informations réelles de votre dépôt, et d'utiliser l'URL `raw` pour les dépôts privés (nécessite un PAT comme expliqué dans la section "Sécurité" du Readme principal de votre dépôt).**
 
     ```bash
-    curl -o full_setup.sh https://raw.githubusercontent.com/emmksoft/setup_server/refs/heads/main/full_setup.sh
+    curl -o full_setup.sh [https://raw.githubusercontent.com/votre_utilisateur/votre_depot/main/full_setup.sh](https://raw.githubusercontent.com/votre_utilisateur/votre_depot/main/full_setup.sh)
     # Si votre dépôt est privé, vous devrez utiliser un PAT:
-    # curl -H "Authorization: token VOTRE_PERSONAL_ACCESS_TOKEN" -H "Accept: application/vnd.github.v3.raw" -L -o full_setup.sh https://raw.githubusercontent.com/emmksoft/setup_server/refs/heads/main/full_setup.sh
+    # curl -H "Authorization: token VOTRE_PERSONAL_ACCESS_TOKEN" -H "Accept: application/vnd.github.v3.raw" -L -o full_setup.sh [https://raw.githubusercontent.com/votre_utilisateur/votre_depot/main/full_setup.sh](https://raw.githubusercontent.com/votre_utilisateur/votre_depot/main/full_setup.sh)
     ```
     *L'option `-o full_setup.sh` enregistre le contenu téléchargé dans un fichier nommé `full_setup.sh`.*
+
+3.  **Convertissez le script au format Unix :**
+    Pour éviter les erreurs de fin de ligne qui peuvent survenir si le script a été édité sur un système Windows, convertissez-le au format Unix :
+    ```bash
+    dos2unix full_setup.sh
+    ```
 
 ### Étape 3: Vérification et Exécution
 
@@ -120,15 +126,8 @@ Avant d'exécuter le script, assurez-vous que :
     ```bash
     chmod +x full_setup.sh
     ```
-3.  **Installez `dos2unix` si ce n'est pas déjà fait** :
-   ```bash
-   sudo apt update && sudo apt install -y dos2unix
-   ```
-4. **Convertissez le fichier** :    
-   ```bash
-   dos2unix full_setup.sh
-   ```
-5. **Exécutez le script avec `sudo`** :
+
+3.  **Exécutez le script avec `sudo`** :
     Le script vous guidera et vous demandera les informations nécessaires (mots de passe pour MySQL, Directus, Samba, etc.) à chaque étape.
 
     ```bash
