@@ -98,7 +98,7 @@ Avant d'exécuter le script, assurez-vous que :
 2.  **Téléchargez le script** `full_setup.sh` depuis votre dépôt GitHub.
 
     ```bash
-    curl -o full_setup.sh [https://github.com/emmksoft/setup_server/raw/main/full_setup.sh](https://github.com/emmksoft/setup_server/raw/main/full_setup.sh)
+    curl -o full_setup.sh https://github.com/emmksoft/setup_server/raw/main/full_setup.sh
     ```
     *L'option `-o full_setup.sh` enregistre le contenu téléchargé dans un fichier nommé `full_setup.sh`.*
 
