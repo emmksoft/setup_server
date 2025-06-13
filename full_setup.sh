@@ -84,7 +84,7 @@ apt autoremove -y || exit_on_error "Échec de la suppression des paquets inutile
 check_status "La mise à jour du système a échoué." "Mise à jour du système terminée."
 
 echo "Installation des outils nécessaires (curl, git, rsync, ufw, openssl)..."
-apt install -y curl git rsync ufw openssl || exit_on_error "Échec de l'installation des outils nécessaires."
+apt install -y curl git rsync ufw openssl expect || exit_on_error "Échec de l'installation des outils nécessaires."
 check_status "L'installation des outils a échoué." "Outils nécessaires installés."
 
 # Activer UFW (Uncomplicated Firewall)
@@ -160,16 +160,25 @@ check_status "La création de la page d'accueil Nginx a échoué." "Page d'accue
 echo -e "\e[32mÉtape 2 terminée: Nginx installé et configuré.\e[0m"
 
 
-# --- 3. Installation de Node.js 22 ---
-echo -e "\n--- Étape 3: Installation de Node.js 22 ---"
+# --- 3. Installation et vérification de Node.js 22 ---
+echo -e "\n--- Étape 3: Installation et vérification de Node.js 22 ---"
 
-echo "Ajout du dépôt NodeSource pour Node.js 22..."
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash - || exit_on_error "Échec de l'ajout du dépôt NodeSource."
-check_status "L'ajout du dépôt NodeSource a échoué." "Dépôt NodeSource ajouté."
-
-echo "Installation de Node.js 22 et npm..."
-apt install -y nodejs || exit_on_error "Échec de l'installation de Node.js 22."
-check_status "L'installation de Node.js a échoué." "Node.js 22 installé."
+# Vérifier si Node.js est déjà installé et à la bonne version
+if command -v node &>/dev/null; then
+    NODE_VERSION=$(node -v)
+    if [[ "$NODE_VERSION" == v22.* ]]; then
+        echo "Node.js $NODE_VERSION est déjà installé et est la version requise (22.x)."
+    else
+        echo "Node.js $NODE_VERSION est installé, mais la version requise est 22.x. Mise à jour..."
+        curl -fsSL https://deb.nodesource.com/setup_22.x | bash - || exit_on_error "Échec de l'ajout du dépôt NodeSource pour la mise à jour."
+        apt install -y nodejs || exit_on_error "Échec de la mise à jour de Node.js."
+    fi
+else
+    echo "Node.js n'est pas installé. Ajout du dépôt NodeSource pour Node.js 22 et installation..."
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - || exit_on_error "Échec de l'ajout du dépôt NodeSource."
+    apt install -y nodejs || exit_on_error "Échec de l'installation de Node.js 22."
+fi
+check_status "L'installation/mise à jour de Node.js a échoué." "Node.js 22 installé/vérifié."
 
 echo "Vérification des versions de Node.js et npm..."
 node_version=$(node -v)
@@ -182,7 +191,7 @@ if [[ "$node_version" != v22.* ]]; then
 fi
 check_status "La vérification des versions Node.js/NPM a échoué." "Versions Node.js/NPM vérifiées."
 
-echo -e "\e[32mÉtape 3 terminée: Node.js 22 installé.\e[0m"
+echo -e "\e[32mÉtape 3 terminée: Node.js 22 installé et vérifié.\e[0m"
 
 
 # --- 4. Installation et configuration de MySQL ---
@@ -201,7 +210,7 @@ echo "Exécution de 'mysql_secure_installation' de manière automatisée..."
 # Cette partie est délicate et peut nécessiter une interaction si le mot de passe root n'est pas vide.
 # Pour une automatisation complète, on suppose que le root n'a pas de mot de passe au début.
 # Les réponses sont "No" pour validation des mots de passe, "Yes" pour suppression des utilisateurs anonymes,
-# "Yes" pour désactiver la connexion root à distance, "Yes" pour supprimer la base de données de test,
+# "Yes" pour désactiver le login root à distance, "Yes" pour supprimer la base de données de test,
 # et "Yes" pour recharger les tables de privilèges.
 # IMPORTANT: Si le mot de passe root est déjà défini, cette partie peut échouer ou demander le mot de passe.
 
@@ -215,13 +224,15 @@ if [ "$MYSQL_ROOT_HAS_PASSWORD" == "0" ]; then
 else
     echo "Le mot de passe root MySQL semble vide. Procédure sans mot de passe initial."
     mysql_secure_installation_command="mysql_secure_installation"
+    # Si le mot de passe root est vide, on va le définir pour pouvoir ensuite créer d'autres users.
+    # Ceci est une simplification pour l'automatisation. Dans un vrai script, il faudrait gérer si l'utilisateur veut un mdp root.
+    echo "Définition d'un mot de passe temporaire pour root MySQL pour la configuration ultérieure."
+    get_password "Veuillez définir un nouveau mot de passe pour l'utilisateur root MySQL" MYSQL_ROOT_PASSWORD
+    mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';" || exit_on_error "Échec de la définition du mot de passe root MySQL."
+    check_status "La définition du mot de passe root MySQL a échoué." "Mot de passe root MySQL défini."
 fi
 
 # Automatisation des réponses pour mysql_secure_installation
-# Cette séquence de `expect` est très spécifique et peut échouer si la version de MySQL ou la logique de `mysql_secure_installation` change.
-# installe expect
-apt install -y expect || exit_on_error "Échec de l'installation de 'expect'."
-
 expect -c "
 set timeout 10
 spawn $mysql_secure_installation_command
@@ -279,6 +290,7 @@ chmod -R 775 "$SAMBA_SHARE_PATH"
 check_status "La création du dossier de partage Samba a échoué." "Dossier de partage Samba créé."
 
 echo "Ajout de l'utilisateur '$CALLING_USER' à Samba..."
+get_password "Veuillez entrer le mot de passe pour l'utilisateur Samba '$CALLING_USER'" CALLING_USER_PASSWORD
 (echo "$CALLING_USER_PASSWORD"; echo "$CALLING_USER_PASSWORD") | smbpasswd -a "$CALLING_USER" || exit_on_error "Échec de l'ajout de l'utilisateur Samba."
 smbpasswd -e "$CALLING_USER" # Activer l'utilisateur Samba
 check_status "L'ajout de l'utilisateur Samba a échoué." "Utilisateur Samba ajouté."
@@ -501,6 +513,7 @@ check_status "La vérification de la syntaxe Nginx a échoué." "Syntaxe Nginx c
 
 echo "Redémarrage de Nginx pour appliquer les changements..."
 systemctl restart nginx || exit_on_error "Échec du redémarrage de Nginx."
+systemctl enable nginx || exit_on_error "Échec de l'activation de Nginx au démarrage."
 check_status "Le redémarrage de Nginx a échoué." "Nginx configuré en reverse proxy et redémarré."
 
 echo -e "\e[32mÉtape 7 terminée: Nginx configuré en reverse proxy pour Directus.\e[0m"
@@ -523,7 +536,7 @@ echo "    Si vous devez réexécuter le script d'installation, assurez-vous de n
 echo "    ou de reconfigurer les anciennes si elles sont importantes pour la persistance des sessions."
 echo "2.  \e[1mVariables d'environnement du système :\e[0m Au lieu de les stocker dans le .env,"
 echo "    vous pouvez les définir comme variables d'environnement au niveau du système"
-echo "    (par exemple, dans `/etc/environment` ou via Systemd dans le service Directus)."
+echo "    (par exemple, dans \`/etc/environment\` ou via Systemd dans le service Directus)."
 echo "    Ceci est plus sécurisé que de les laisser dans un fichier lisible par tous."
 echo "3.  \e[1mGestionnaire de secrets :\e[0m Pour des déploiements plus complexes, utilisez des outils"
 echo "    comme HashiCorp Vault ou Kubernetes Secrets pour gérer ces clés."
