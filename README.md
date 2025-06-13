@@ -120,11 +120,11 @@ Avant d'exécuter le script, assurez-vous que :
     ```bash
     chmod +x full_setup.sh
     ```
-3. **Installez `dos2unix` si ce n'est pas déjà fait :
+3.  **Installez `dos2unix` si ce n'est pas déjà fait** :
    ```bash
    sudo apt update && sudo apt install -y dos2unix
    ```
-4. **Convertissez le fichier :    
+4. **Convertissez le fichier** :    
    ```bash
    dos2unix full_setup.sh
    ```
