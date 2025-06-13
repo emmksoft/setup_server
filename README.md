@@ -124,7 +124,7 @@ Avant d'exécuter le script, assurez-vous que :
    ```bash
    sudo apt update && sudo apt install -y dos2unix
    ```
-4. **Convertir le fichier :    
+4. **Convertissez le fichier :    
    ```bash
    dos2unix full_setup.sh
    ```
