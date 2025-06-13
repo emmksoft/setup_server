@@ -32,18 +32,18 @@ Le script `full_setup.sh` réalise les opérations suivantes :
 
 * **Vérification des Prérequis :** S'assure que l'utilisateur exécutant le script dispose des privilèges `sudo`.
 * **Mise à jour Système :** Met à jour les listes de paquets et les paquets installés.
-* **Installation d'Outils Essentiels :** Installe `curl`, `git`, `rsync`, `ufw`, et `openssl`.
+* **Installation d'Outils Essentiels :** Installe `curl`, `git`, `rsync`, `ufw`, `openssl` et `expect`.
 * **Configuration de `UFW` (Uncomplicated Firewall) :** Active le pare-feu et autorise les connexions SSH, HTTP, HTTPS, et le port interne de Directus.
 * **Installation et Configuration de Nginx :**
     * Installe Nginx et l'active au démarrage.
     * Crée une racine de site par défaut (`/var/www/NOM_HOTE_SERVEUR`).
     * Configure un `server block` Nginx utilisant le **nom d'hôte** du serveur comme `server_name`.
     * Met en place un **reverse proxy** pour Directus accessible via le chemin `/directus` (ex: `http://NOM_HOTE_SERVEUR/directus`), tout en permettant l'hébergement d'autres sites à la racine du domaine ou sur d'autres chemins.
-* **Installation de Node.js 22 :** Ajoute le dépôt NodeSource et installe Node.js version 22 et `npm`.
+* **Installation et vérification de Node.js 22 :** Ajoute le dépôt NodeSource et installe Node.js version 22 et `npm`. Le script vérifie si Node.js est déjà présent et à la bonne version, et effectue une mise à jour ou une installation si nécessaire.
 * **Installation et Configuration de MySQL Server :**
     * Installe MySQL Server et l'active au démarrage.
     * **Automatise `mysql_secure_installation` :** Exécute les étapes de sécurisation par défaut.
-    * Demande un **mot de passe root MySQL** si nécessaire.
+    * Demande un **mot de passe root MySQL** si nécessaire et le configure s'il est vide.
     * Crée un utilisateur MySQL dédié et une base de données (`mksoft_db`) avec tous les privilèges requis pour Directus.
 * **Installation et Configuration de Samba :**
     * Installe Samba pour le partage de fichiers en réseau.
@@ -96,27 +96,29 @@ Avant d'exécuter le script, assurez-vous que :
     cd ~
     ```
 2.  **Téléchargez le script** `full_setup.sh` depuis votre dépôt GitHub.
-    **N'oubliez pas de remplacer `votre_utilisateur` et `votre_depot` par les informations réelles de votre dépôt.**
+    **N'oubliez pas de remplacer `votre_utilisateur` et `votre_depot` par les informations réelles de votre dépôt, et d'utiliser l'URL `raw` pour les dépôts privés (nécessite un PAT comme expliqué dans la section "Sécurité" du Readme principal de votre dépôt).**
 
     ```bash
-    sudo curl -o full_setup.sh https://raw.githubusercontent.com/emmksoft/setup_server/refs/heads/main/full_setup.sh
+    curl -o full_setup.sh [https://raw.githubusercontent.com/votre_utilisateur/votre_depot/main/full_setup.sh](https://raw.githubusercontent.com/votre_utilisateur/votre_depot/main/full_setup.sh)
+    # Si votre dépôt est privé, vous devrez utiliser un PAT:
+    # curl -H "Authorization: token VOTRE_PERSONAL_ACCESS_TOKEN" -H "Accept: application/vnd.github.v3.raw" -L -o full_setup.sh [https://raw.githubusercontent.com/votre_utilisateur/votre_depot/main/full_setup.sh](https://raw.githubusercontent.com/votre_utilisateur/votre_depot/main/full_setup.sh)
     ```
     *L'option `-o full_setup.sh` enregistre le contenu téléchargé dans un fichier nommé `full_setup.sh`.*
 
 ### Étape 3: Vérification et Exécution
 
 1.  **Vérifiez le contenu du script (CRITIQUE pour la sécurité!)** :
-    **Avant d'exécuter avec `sudo`, lisez attentivement le script pour vous assurer qu'il est sûr et qu'il correspond à vos attentes.**
+    **Avant d'exécuter avec `sudo`, lisez attentivement le script pour vous assurer qu'il est sûr et qu'il correspond à vos attentes.** Vérifiez particulièrement la première ligne (`#!/bin/bash`) et l'absence de caractères `^M` (retours chariot Windows) en fin de ligne (utilisez `cat -A full_setup.sh`).
 
     ```bash
     less full_setup.sh # Pour lire le script (appuyez sur 'q' pour quitter)
     # ou
-    cat full_setup.sh  # Pour afficher tout le script dans le terminal
+    cat -A full_setup.sh  # Pour afficher tout le script (y compris caractères cachés)
     ```
 
 2.  **Rendez le script exécutable** :
     ```bash
-    sudo chmod +x full_setup.sh
+    chmod +x full_setup.sh
     ```
 
 3.  **Exécutez le script avec `sudo`** :
