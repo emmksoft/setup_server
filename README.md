@@ -99,9 +99,9 @@ Avant d'exécuter le script, assurez-vous que :
     **N'oubliez pas de remplacer `votre_utilisateur` et `votre_depot` par les informations réelles de votre dépôt, et d'utiliser l'URL `raw` pour les dépôts privés (nécessite un PAT comme expliqué dans la section "Sécurité" du Readme principal de votre dépôt).**
 
     ```bash
-    curl -o full_setup.sh [https://raw.githubusercontent.com/votre_utilisateur/votre_depot/main/full_setup.sh](https://raw.githubusercontent.com/votre_utilisateur/votre_depot/main/full_setup.sh)
+    curl -o full_setup.sh https://raw.githubusercontent.com/emmksoft/setup_server/refs/heads/main/full_setup.sh
     # Si votre dépôt est privé, vous devrez utiliser un PAT:
-    # curl -H "Authorization: token VOTRE_PERSONAL_ACCESS_TOKEN" -H "Accept: application/vnd.github.v3.raw" -L -o full_setup.sh [https://raw.githubusercontent.com/votre_utilisateur/votre_depot/main/full_setup.sh](https://raw.githubusercontent.com/votre_utilisateur/votre_depot/main/full_setup.sh)
+    # curl -H "Authorization: token VOTRE_PERSONAL_ACCESS_TOKEN" -H "Accept: application/vnd.github.v3.raw" -L -o full_setup.sh https://raw.githubusercontent.com/emmksoft/setup_server/refs/heads/main/full_setup.sh
     ```
     *L'option `-o full_setup.sh` enregistre le contenu téléchargé dans un fichier nommé `full_setup.sh`.*
 
@@ -120,8 +120,15 @@ Avant d'exécuter le script, assurez-vous que :
     ```bash
     chmod +x full_setup.sh
     ```
-
-3.  **Exécutez le script avec `sudo`** :
+3. **Installez `dos2unix` si ce n'est pas déjà fait :
+   ```bash
+   sudo apt update && sudo apt install -y dos2unix
+   ```
+4. **Convertir le fichier :    
+   ```bash
+   dos2unix full_setup.sh
+   ```
+5. **Exécutez le script avec `sudo`** :
     Le script vous guidera et vous demandera les informations nécessaires (mots de passe pour MySQL, Directus, Samba, etc.) à chaque étape.
 
     ```bash
