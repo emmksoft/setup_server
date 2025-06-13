@@ -45,6 +45,13 @@ function get_password {
     done
 }
 
+# --- EXPORTER LES FONCTIONS POUR LES SOUS-SHELLS ---
+# Ceci est CRUCIAL pour que les fonctions soient accessibles dans le 'sudo -u ... bash -c'
+export -f exit_on_error
+export -f check_status
+export -f get_password
+
+
 echo -e "\e[34mDébut de l'installation et de la configuration du serveur...\e[0m" # Texte bleu
 
 # --- Vérification des privilèges et utilisateur ---
@@ -272,90 +279,63 @@ systemctl enable mysql || exit_on_error "Échec de l'activation de MySQL au dém
 systemctl start mysql || exit_on_error "Échec du démarrage de MySQL."
 check_status "Le démarrage de MySQL a échoué." "MySQL Server démarré."
 
-echo "Exécution de 'mysql_secure_installation' de manière automatisée..."
+echo "Sécurisation de MySQL via requêtes SQL directes..."
 
-# Vérifier si expect est installé (déjà fait au début du script, mais pour la robustesse ici)
-if ! command -v expect &> /dev/null
-then
-    echo "expect n'est pas installé. Installation en cours..."
-    sudo apt install -y expect || exit_on_error "Échec de l'installation de expect."
-fi
+# Demander le NOUVEAU mot de passe root fort à l'utilisateur
+# Ce mot de passe sera utilisé pour définir le mot de passe root et pour les opérations suivantes
+get_password "Veuillez définir un NOUVEAU mot de passe FORT pour l'utilisateur root de MySQL" MYSQL_ROOT_PASSWORD_NEW
 
-# Demander le mot de passe root MySQL si l'utilisateur ne l'a pas déjà défini
-# Tester si le root MySQL a déjà un mot de passe
-MYSQL_ROOT_HAS_PASSWORD=false
-if mysql -u root -p"" -e "exit" 2>/dev/null; then
-    echo "Connexion MySQL root sans mot de passe réussie, on suppose qu'il n'y a pas de mot de passe root initial."
-    MYSQL_ROOT_PASSWORD="" # Laisser vide pour que expect gère l'invite initiale
+# Tenter de se connecter à MySQL en tant que root.
+# On essaie d'abord sans mot de passe (cas après une installation fraîche ou si auth_socket)
+# puis avec le mot de passe temporaire si MySQL 8 l'a généré.
+MYSQL_ROOT_LOGIN_COMMAND=""
+MYSQL_ROOT_CONNECT_SUCCESS=false
+
+# Test 1: Connexion sans mot de passe (pour les systèmes qui utilisent auth_socket ou pas de mot de passe initial)
+if mysql -u root -e "SELECT 1;" &>/dev/null; then
+    MYSQL_ROOT_LOGIN_COMMAND="mysql -u root"
+    MYSQL_ROOT_CONNECT_SUCCESS=true
+    echo "Connecté à MySQL en tant que root sans mot de passe initial."
 else
-    # Demander le mot de passe s'il est déjà défini
-    echo "Il semble que l'utilisateur root MySQL ait déjà un mot de passe."
-    get_password "Veuillez entrer le mot de passe actuel de l'utilisateur root MySQL (laissez vide si vous ne savez pas ou si c'est une première installation)" MYSQL_ROOT_PASSWORD
-    MYSQL_ROOT_HAS_PASSWORD=true
+    # Test 2: Rechercher un mot de passe temporaire dans les logs MySQL 8+
+    MYSQL_TEMP_PASSWORD=$(sudo grep -E "A temporary password|password for user 'root'" /var/log/mysql/error.log | tail -n 1 | grep -oP "password for user 'root'@'localhost' is: \K.*")
+    if [ -n "$MYSQL_TEMP_PASSWORD" ]; then
+        # Tenter de se connecter avec le mot de passe temporaire
+        if mysql -u root -p"$MYSQL_TEMP_PASSWORD" -e "SELECT 1;" &>/dev/null; then
+            MYSQL_ROOT_LOGIN_COMMAND="mysql -u root -p\"$MYSQL_TEMP_PASSWORD\""
+            MYSQL_ROOT_CONNECT_SUCCESS=true
+            echo "Connecté à MySQL en tant que root avec le mot de passe temporaire."
+        fi
+    fi
 fi
 
-# Utilisation de expect pour automatiser mysql_secure_installation
-sudo expect <<EOF
-set timeout 10
-spawn mysql_secure_installation
+if [ "$MYSQL_ROOT_CONNECT_SUCCESS" == "false" ]; then
+    echo "ERREUR: Impossible de se connecter à MySQL en tant que root avec les méthodes par défaut."
+    echo "Veuillez vérifier manuellement le mot de passe root (ex: sudo grep -E 'temporary password|password for user 'root'' /var/log/mysql/error.log) "
+    echo "ou essayez de vous connecter via 'sudo mysql' pour diagnostiquer le problème."
+    exit_on_error "Impossible de procéder à la sécurisation MySQL."
+fi
 
-# Handle the initial password prompt (might be empty if new install or if a password was just set)
-expect {
-    "Enter current password for root (enter for none):" {
-        send "$MYSQL_ROOT_PASSWORD\r"
-        exp_continue
-    }
-    "Would you like to setup VALIDATE PASSWORD component?" {
-        send "n\r" ; # No to VALIDATE PASSWORD component
-        exp_continue
-    }
-    "Change the root password?" {
-        if { "$MYSQL_ROOT_HAS_PASSWORD" == "true" } {
-            send "n\r" ; # No, if it was just entered
-        } else {
-            send "y\r" ; # Yes, if it's a new install and needs setting
-            expect "New password:"
-            send "$MYSQL_ROOT_PASSWORD\r"
-            expect "Re-enter new password:"
-            send "$MYSQL_ROOT_PASSWORD\r"
-            expect "Remove anonymous users?" # Continue after setting password
-        }
-        exp_continue
-    }
-    "Do you wish to continue with the password provided?" { # MySQL 8 prompt after password validation
-        send "y\r"
-        exp_continue
-    }
-    "Remove anonymous users?" {
-        send "y\r"
-        exp_continue
-    }
-    "Disallow root login remotely?" {
-        send "y\r"
-        exp_continue
-    }
-    "Remove test database and access to it?" {
-        send "y\r"
-        exp_continue
-    }
-    "Reload privilege tables now?" {
-        send "y\r"
-        exp_continue
-    }
-    eof {
-        # End of file, script finished
-    }
-}
-expect eof
-EOF
+# Exécuter les requêtes de sécurisation en utilisant la commande de connexion déterminée
+# Le mot de passe root temporaire (s'il existe) est utilisé pour la connexion initiale,
+# puis il est changé par MYSQL_ROOT_PASSWORD_NEW.
+eval "$MYSQL_ROOT_LOGIN_COMMAND" <<MYSQL_SCRIPT
+ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '$MYSQL_ROOT_PASSWORD_NEW';
+DELETE FROM mysql.user WHERE User='';
+DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+DROP DATABASE IF EXISTS test;
+DELETE FROM mysql.db WHERE Db='test' OR Db='test\_%';
+FLUSH PRIVILEGES;
+MYSQL_SCRIPT
 
 if [ $? -eq 0 ]; then
-    echo "Configuration MySQL sécurisée terminée."
+    echo "Configuration MySQL sécurisée terminée via requêtes SQL."
 else
-    echo "Erreur lors de la configuration sécurisée de MySQL. Veuillez vérifier manuellement."
-    exit_on_error "mysql_secure_installation a échoué."
+    exit_on_error "Erreur lors de la configuration sécurisée de MySQL via requêtes SQL. Veuillez vérifier manuellement."
 fi
-check_status "L'automatisation de mysql_secure_installation a échoué." "mysql_secure_installation automatisé avec succès."
+
+# Mettre à jour la variable globale MYSQL_ROOT_PASSWORD pour les opérations suivantes
+MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD_NEW"
 
 
 echo "Configuration de l'utilisateur et de la base de données MySQL pour Directus..."
@@ -364,6 +344,7 @@ get_password "Veuillez entrer le nom d'utilisateur MySQL à créer pour Directus
 get_password "Veuillez entrer le mot de passe pour l'utilisateur MySQL '$MYSQL_USER'" MYSQL_PASSWORD
 
 # Créer l'utilisateur, la base de données et accorder les privilèges
+# Utiliser le nouveau mot de passe root pour cette connexion
 mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e "
 CREATE USER IF NOT EXISTS '$MYSQL_USER'@'localhost' IDENTIFIED BY '$MYSQL_PASSWORD';
 CREATE DATABASE IF NOT EXISTS \`$MYSQL_DB_NAME\`;
@@ -431,15 +412,6 @@ check_status "Le redémarrage de Samba a échoué." "Samba redémarré."
 
 echo -e "\e[32mInstallation et configuration de Samba terminées.\e[0m"
 
-# ... (Partie du script avant l'étape 5) ...
-
-# --- EXPORTER LES FONCTIONS POUR LES SOUS-SHELLS ---
-# Ceci est CRUCIAL pour que les fonctions soient accessibles dans le 'sudo -u ... bash -c'
-export -f exit_on_error
-export -f check_status
-export -f get_password
-
-# ... (Le reste du script après l'étape 5, avant la section Directus) ...
 
 # --- 5. Création du projet Directus ---
 echo -e "\n--- Étape 5: Création du projet Directus ---"
@@ -454,16 +426,18 @@ fi
 chown -R "$DIRECTUS_RUN_USER":"$DIRECTUS_RUN_USER" "$DIRECTUS_INSTALL_PATH"
 chmod -R 755 "$DIRECTUS_INSTALL_PATH"
 
-# Exécuter les commandes npm/directus en tant que DIRECTUS_RUN_USER
-# IMPORTANT : On passe toutes les variables nécessaires au sous-shell via la commande export
-sudo -u "$DIRECTUS_RUN_USER" bash -c "
-    # Redéfinir les chemins des fonctions à l'intérieur du sous-shell si nécessaire
-    # (Bien que export -f devrait suffire, cela peut parfois être plus robuste)
-    # Laissez ces lignes commentées à moins que vous ne rencontriez encore des problèmes
-    # exit_on_error() { /usr/bin/bash -c \"$(declare -f exit_on_error); exit_on_error \\\"\$@\\\"\"; }
-    # check_status() { /usr/bin/bash -c \"$(declare -f check_status); check_status \\\"\$@\\\"\"; }
-    # get_password() { /usr/bin/bash -c \"$(declare -f get_password); get_password \\\"\$@\\\"\"; }
+# Exporter les variables nécessaires au sous-shell pour Directus
+export MYSQL_USER
+export MYSQL_PASSWORD
+export MYSQL_DB_NAME
+export DIRECTUS_PORT
+export NGINX_SERVER_NAME # Pour URL_PUBLIC si décommenté
+export DIRECTUS_INSTALL_PATH # Nécessaire pour le sous-shell
+export DIRECTUS_BIN # Pour s'assurer que c'est bien le binaire local
+export CALLING_USER # Pour get_password si utilisé dans le sous-shell
 
+# Exécuter les commandes npm/directus en tant que DIRECTUS_RUN_USER
+sudo -u "$DIRECTUS_RUN_USER" bash -c "
     echo 'Déplacement vers le dossier Directus...'
     cd \"$DIRECTUS_INSTALL_PATH\" || exit_on_error \"Échec du déplacement vers le dossier Directus.\"
 
@@ -480,13 +454,11 @@ sudo -u "$DIRECTUS_RUN_USER" bash -c "
     fi
 
     echo 'Vérification de l'initialisation du projet Directus...'
-    if [ ! -f \"$DIRECTUS_INSTALL_PATH/.env\" ]; then
+    if [ ! -f \"\$DIRECTUS_INSTALL_PATH/.env\" ]; then
         echo 'Le fichier .env de Directus n'existe pas. Initialisation du projet...'
-        # Les variables ADMIN_EMAIL et ADMIN_PASSWORD doivent être passées du shell parent
-        # ou demandées directement ici si elles n'ont pas été passées.
-        # Pour simplifier, on les demande directement ici car elles sont interactives.
-        # Note: on ne peut pas utiliser get_password directement ici si elle n'est pas exportée/définie.
-        # Puisqu'on l'a exportée, cela devrait fonctionner.
+        
+        # Demander les emails/mots de passe de l'administrateur Directus
+        # On utilise directement les fonctions exportées du shell parent
         get_password \"Veuillez entrer l'email de l'administrateur Directus\" DIRECTUS_ADMIN_EMAIL_INNER
         get_password \"Veuillez entrer le mot de passe de l'administrateur Directus\" DIRECTUS_ADMIN_PASSWORD_INNER
 
@@ -494,9 +466,9 @@ sudo -u "$DIRECTUS_RUN_USER" bash -c "
         export DB_CLIENT=\"mysql\"
         export DB_HOST=\"localhost\"
         export DB_PORT=\"3306\"
-        export DB_USER=\"$MYSQL_USER\" # Ces variables sont exportées du shell parent
-        export DB_PASSWORD=\"$MYSQL_PASSWORD\" # et donc disponibles ici
-        export DB_DATABASE=\"$MYSQL_DB_NAME\"
+        export DB_USER=\"\$MYSQL_USER\"
+        export DB_PASSWORD=\"\$MYSQL_PASSWORD\"
+        export DB_DATABASE=\"\$MYSQL_DB_NAME\"
         export ADMIN_EMAIL=\"\$DIRECTUS_ADMIN_EMAIL_INNER\"
         export ADMIN_PASSWORD=\"\$DIRECTUS_ADMIN_PASSWORD_INNER\"
 
@@ -512,19 +484,22 @@ sudo -u "$DIRECTUS_RUN_USER" bash -c "
 
         echo 'Création du fichier .env pour Directus...'
         # Utiliser printf pour construire le fichier .env de manière plus robuste
-        printf "DB_CLIENT=\"%s\"\n" "\$DB_CLIENT" > \"$DIRECTUS_INSTALL_PATH/.env\"
-        printf "DB_HOST=\"%s\"\n" "\$DB_HOST" >> \"$DIRECTUS_INSTALL_PATH/.env\"
-        printf "DB_PORT=\"%s\"\n" "\$DB_PORT" >> \"$DIRECTUS_INSTALL_PATH/.env\"
-        printf "DB_USER=\"%s\"\n" "\$DB_USER" >> \"$DIRECTUS_INSTALL_PATH/.env\"
-        printf "DB_PASSWORD=\"%s\"\n" "\$DB_PASSWORD" >> \"$DIRECTUS_INSTALL_PATH/.env\"
-        printf "DB_DATABASE=\"%s\"\n" "\$DB_DATABASE" >> \"$DIRECTUS_INSTALL_PATH/.env\"
-        printf "ADMIN_EMAIL=\"%s\"\n" "\$ADMIN_EMAIL" >> \"$DIRECTUS_INSTALL_PATH/.env\"
-        printf "ADMIN_PASSWORD=\"%s\"\n" "\$ADMIN_PASSWORD" >> \"$DIRECTUS_INSTALL_PATH/.env\"
-        printf "KEY=\"%s\"\n" "\$KEY" >> \"$DIRECTUS_INSTALL_PATH/.env\"
-        printf "SECRET=\"%s\"\n" "\$SECRET" >> \"$DIRECTUS_INSTALL_PATH/.env\"
-        printf "PORT=%s\n" "$DIRECTUS_PORT" >> \"$DIRECTUS_INSTALL_PATH/.env\"
-        printf "NODE_ENV=production\n" >> \"$DIRECTUS_INSTALL_PATH/.env\"
-        # printf "URL_PUBLIC=http://%s/directus\n" "\$NGINX_SERVER_NAME" >> \"$DIRECTUS_INSTALL_PATH/.env\" # Commenté comme dans votre script
+        printf "DB_CLIENT=\"%s\"\n" "\$DB_CLIENT" > \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "DB_HOST=\"%s\"\n" "\$DB_HOST" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "DB_PORT=\"%s\"\n" "\$DB_PORT" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "DB_USER=\"%s\"\n" "\$DB_USER" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "DB_PASSWORD=\"%s\"\n" "\$DB_PASSWORD" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "DB_DATABASE=\"%s\"\n" "\$DB_DATABASE" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "ADMIN_EMAIL=\"%s\"\n" "\$ADMIN_EMAIL" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "ADMIN_PASSWORD=\"%s\"\n" "\$ADMIN_PASSWORD" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "KEY=\"%s\"\n" "\$KEY" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "SECRET=\"%s\"\n" "\$SECRET" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "PORT=%s\n" "\$DIRECTUS_PORT" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        printf "NODE_ENV=production\n" >> \"\$DIRECTUS_INSTALL_PATH/.env\"
+        # printf "URL_PUBLIC=http://%s/directus\n" "\$NGINX_SERVER_NAME" >> \"\$DIRECTUS_INSTALL_PATH/.env\" # Commenté comme dans votre script
+        
+        # S'assurer que le fichier .env a les bonnes permissions (lecture/écriture pour le propriétaire uniquement)
+        chmod 600 \"\$DIRECTUS_INSTALL_PATH/.env\"
 
         echo 'Fichier .env de Directus créé.'
         check_status \"L'initialisation/bootstrap de Directus a échoué.\" \"Projet Directus initialisé et configuré.\"
@@ -533,8 +508,6 @@ sudo -u "$DIRECTUS_RUN_USER" bash -c "
     fi
 " || exit_on_error "Échec de l'installation/configuration de Directus en tant que $DIRECTUS_RUN_USER."
 check_status "L'installation de Directus a échoué." "Projet Directus créé et configuré."
-
-# ... (Reste du script) ...
 
 echo "Autorisation du port Directus ($DIRECTUS_PORT) sur UFW..."
 if ! ufw status | grep -q "$DIRECTUS_PORT"; then
@@ -705,7 +678,7 @@ echo "Récapitulatif :"
 echo "  - Nginx est configuré pour servir le contenu depuis $NGINX_ROOT_DIR"
 echo "  - Votre site web par défaut est accessible via HTTP sur http://$NGINX_SERVER_NAME/"
 echo "  - Node.js 22 est installé."
-echo "  - MySQL est installé, sécurisé via mysql_secure_installation automatisé,"
+echo "  - MySQL est installé, sécurisé via des requêtes SQL directes,"
 echo "    avec l'utilisateur '$MYSQL_USER' et la base de données '$MYSQL_DB_NAME'."
 echo "  - Samba est configuré. Partage '$SAMBA_SHARE_NAME' sur '$SAMBA_SHARE_PATH'."
 echo "    Accès via l'utilisateur système '$CALLING_USER'."
