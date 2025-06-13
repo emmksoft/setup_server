@@ -36,9 +36,9 @@ Le script `full_setup.sh` réalise les opérations suivantes :
 * **Configuration de `UFW` (Uncomplicated Firewall) :** Active le pare-feu et autorise les connexions SSH, HTTP, HTTPS, et le port interne de Directus.
 * **Installation et Configuration de Nginx :**
     * Installe Nginx et l'active au démarrage.
-    * Crée une racine de site par défaut (`/var/www/NOM_HOTE_SERVEUR`).
+    * Crée une racine de site par défaut (`/var/www/mksoft`).
     * Configure un `server block` Nginx utilisant le **nom d'hôte** du serveur comme `server_name`.
-    * Met en place un **reverse proxy** pour Directus accessible via le chemin `/directus` (ex: `http://NOM_HOTE_SERVEUR/directus`), tout en permettant l'hébergement d'autres sites à la racine du domaine ou sur d'autres chemins.
+    * Met en place un **reverse proxy** pour Directus accessible via le chemin `/directus` (ex: `http://mksoft/directus`), tout en permettant l'hébergement d'autres sites à la racine du domaine ou sur d'autres chemins.
 * **Installation de Node.js 22 :** Ajoute le dépôt NodeSource et installe Node.js version 22 et `npm`.
 * **Installation et Configuration de MySQL Server :**
     * Installe MySQL Server et l'active au démarrage.
@@ -96,10 +96,9 @@ Avant d'exécuter le script, assurez-vous que :
     cd ~
     ```
 2.  **Téléchargez le script** `full_setup.sh` depuis votre dépôt GitHub.
-    **N'oubliez pas de remplacer `votre_utilisateur` et `votre_depot` par les informations réelles de votre dépôt.**
 
     ```bash
-    curl -o full_setup.sh [https://github.com/votre_utilisateur/votre_depot/raw/main/full_setup.sh](https://github.com/votre_utilisateur/votre_depot/raw/main/full_setup.sh)
+    curl -o full_setup.sh [https://github.com/emmksoft/setup_server/raw/main/full_setup.sh](https://github.com/emmksoft/setup_server/raw/main/full_setup.sh)
     ```
     *L'option `-o full_setup.sh` enregistre le contenu téléchargé dans un fichier nommé `full_setup.sh`.*
 
@@ -132,8 +131,8 @@ Avant d'exécuter le script, assurez-vous que :
 
 Voici un aperçu des emplacements clés configurés par le script :
 
-* **Racine Nginx par défaut :** `/var/www/NOM_HOTE_SERVEUR`
-* **Fichier de configuration Nginx :** `/etc/nginx/sites-available/NOM_HOTE_SERVEUR`
+* **Racine Nginx par défaut :** `/var/www/mksoft`
+* **Fichier de configuration Nginx :** `/etc/nginx/sites-available/mksoft`
 * **Chemin d'installation Directus :** `/var/www/directus_mksoft`
 * **Fichier de service Systemd Directus :** `/etc/systemd/system/directus.service`
 * **Chemin du partage Samba :** `/srv/shared_data`
@@ -144,12 +143,12 @@ Voici un aperçu des emplacements clés configurés par le script :
 
 Une fois le script exécuté avec succès :
 
-* **Votre Site Web par Défaut :** Accédez à `http://NOM_HOTE_SERVEUR/` dans votre navigateur (remplacez `NOM_HOTE_SERVEUR` par le nom d'hôte de votre serveur).
-* **L'Interface d'Administration Directus :** Naviguez vers `http://NOM_HOTE_SERVEUR/directus/admin`.
+* **Votre Site Web par Défaut :** Accédez à `http://mksoft/` dans votre navigateur (remplacez `mksoft` par le nom d'hôte de votre serveur).
+* **L'Interface d'Administration Directus :** Naviguez vers `http://mksoft/directus/admin`.
     * Utilisez l'email et le mot de passe d'administrateur Directus que vous avez saisis.
 * **Partage Samba :**
-    * **Depuis Windows :** Ouvrez l'Explorateur de fichiers et tapez `\\NOM_HOTE_SERVEUR\shared_data` dans la barre d'adresse.
-    * **Depuis Linux/macOS :** Connectez-vous à `smb://NOM_HOTE_SERVEUR/shared_data`.
+    * **Depuis Windows :** Ouvrez l'Explorateur de fichiers et tapez `\\mksoft\shared_data` dans la barre d'adresse.
+    * **Depuis Linux/macOS :** Connectez-vous à `smb://mksoft/shared_data`.
     * Utilisez le nom d'utilisateur et le mot de passe Samba que vous avez configurés pour l'utilisateur système qui a exécuté le script.
 
 ---
@@ -166,7 +165,7 @@ Utilisez ces commandes pour vérifier l'état des services et diagnostiquer d'é
 * **MySQL :**
     ```bash
     sudo systemctl status mysql
-    mysql -u votre_utilisateur_directus -p mksoft_db # Tentez de vous connecter à la DB Directus
+    mysql -u user -p mksoft_db # Tentez de vous connecter à la DB Directus
     ```
 * **Directus Service :**
     ```bash
