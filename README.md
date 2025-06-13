@@ -99,7 +99,7 @@ Avant d'exécuter le script, assurez-vous que :
     **N'oubliez pas de remplacer `votre_utilisateur` et `votre_depot` par les informations réelles de votre dépôt.**
 
     ```bash
-    curl -o full_setup.sh https://raw.githubusercontent.com/emmksoft/setup_server/refs/heads/main/full_setup.sh
+    sudo curl -o full_setup.sh https://raw.githubusercontent.com/emmksoft/setup_server/refs/heads/main/full_setup.sh
     ```
     *L'option `-o full_setup.sh` enregistre le contenu téléchargé dans un fichier nommé `full_setup.sh`.*
 
@@ -116,7 +116,7 @@ Avant d'exécuter le script, assurez-vous que :
 
 2.  **Rendez le script exécutable** :
     ```bash
-    chmod +x full_setup.sh
+    sudo chmod +x full_setup.sh
     ```
 
 3.  **Exécutez le script avec `sudo`** :
