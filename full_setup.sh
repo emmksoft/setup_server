@@ -431,6 +431,15 @@ check_status "Le redémarrage de Samba a échoué." "Samba redémarré."
 
 echo -e "\e[32mInstallation et configuration de Samba terminées.\e[0m"
 
+# ... (Partie du script avant l'étape 5) ...
+
+# --- EXPORTER LES FONCTIONS POUR LES SOUS-SHELLS ---
+# Ceci est CRUCIAL pour que les fonctions soient accessibles dans le 'sudo -u ... bash -c'
+export -f exit_on_error
+export -f check_status
+export -f get_password
+
+# ... (Le reste du script après l'étape 5, avant la section Directus) ...
 
 # --- 5. Création du projet Directus ---
 echo -e "\n--- Étape 5: Création du projet Directus ---"
@@ -446,8 +455,15 @@ chown -R "$DIRECTUS_RUN_USER":"$DIRECTUS_RUN_USER" "$DIRECTUS_INSTALL_PATH"
 chmod -R 755 "$DIRECTUS_INSTALL_PATH"
 
 # Exécuter les commandes npm/directus en tant que DIRECTUS_RUN_USER
-echo "Passage à l'utilisateur '$DIRECTUS_RUN_USER' pour l'installation et la configuration de Directus..."
+# IMPORTANT : On passe toutes les variables nécessaires au sous-shell via la commande export
 sudo -u "$DIRECTUS_RUN_USER" bash -c "
+    # Redéfinir les chemins des fonctions à l'intérieur du sous-shell si nécessaire
+    # (Bien que export -f devrait suffire, cela peut parfois être plus robuste)
+    # Laissez ces lignes commentées à moins que vous ne rencontriez encore des problèmes
+    # exit_on_error() { /usr/bin/bash -c \"$(declare -f exit_on_error); exit_on_error \\\"\$@\\\"\"; }
+    # check_status() { /usr/bin/bash -c \"$(declare -f check_status); check_status \\\"\$@\\\"\"; }
+    # get_password() { /usr/bin/bash -c \"$(declare -f get_password); get_password \\\"\$@\\\"\"; }
+
     echo 'Déplacement vers le dossier Directus...'
     cd \"$DIRECTUS_INSTALL_PATH\" || exit_on_error \"Échec du déplacement vers le dossier Directus.\"
 
@@ -466,7 +482,11 @@ sudo -u "$DIRECTUS_RUN_USER" bash -c "
     echo 'Vérification de l'initialisation du projet Directus...'
     if [ ! -f \"$DIRECTUS_INSTALL_PATH/.env\" ]; then
         echo 'Le fichier .env de Directus n'existe pas. Initialisation du projet...'
-        # Demander les mots de passe pour l'administrateur Directus
+        # Les variables ADMIN_EMAIL et ADMIN_PASSWORD doivent être passées du shell parent
+        # ou demandées directement ici si elles n'ont pas été passées.
+        # Pour simplifier, on les demande directement ici car elles sont interactives.
+        # Note: on ne peut pas utiliser get_password directement ici si elle n'est pas exportée/définie.
+        # Puisqu'on l'a exportée, cela devrait fonctionner.
         get_password \"Veuillez entrer l'email de l'administrateur Directus\" DIRECTUS_ADMIN_EMAIL_INNER
         get_password \"Veuillez entrer le mot de passe de l'administrateur Directus\" DIRECTUS_ADMIN_PASSWORD_INNER
 
@@ -474,8 +494,8 @@ sudo -u "$DIRECTUS_RUN_USER" bash -c "
         export DB_CLIENT=\"mysql\"
         export DB_HOST=\"localhost\"
         export DB_PORT=\"3306\"
-        export DB_USER=\"$MYSQL_USER\"
-        export DB_PASSWORD=\"$MYSQL_PASSWORD\"
+        export DB_USER=\"$MYSQL_USER\" # Ces variables sont exportées du shell parent
+        export DB_PASSWORD=\"$MYSQL_PASSWORD\" # et donc disponibles ici
         export DB_DATABASE=\"$MYSQL_DB_NAME\"
         export ADMIN_EMAIL=\"\$DIRECTUS_ADMIN_EMAIL_INNER\"
         export ADMIN_PASSWORD=\"\$DIRECTUS_ADMIN_PASSWORD_INNER\"
@@ -491,21 +511,21 @@ sudo -u "$DIRECTUS_RUN_USER" bash -c "
         \$DIRECTUS_BIN bootstrap || exit_on_error \"Échec du bootstrap de Directus.\"
 
         echo 'Création du fichier .env pour Directus...'
-        cat <<EOF > \"$DIRECTUS_INSTALL_PATH/.env\"
-DB_CLIENT=\"\$DB_CLIENT\"
-DB_HOST=\"\$DB_HOST\"
-DB_PORT=\"\$DB_PORT\"
-DB_USER=\"\$DB_USER\"
-DB_PASSWORD=\"\$DB_PASSWORD\"
-DB_DATABASE=\"\$DB_DATABASE\"
-ADMIN_EMAIL=\"\$ADMIN_EMAIL\"
-ADMIN_PASSWORD=\"\$ADMIN_PASSWORD\"
-KEY=\"\$KEY\"
-SECRET=\"\$SECRET\"
-PORT=$DIRECTUS_PORT
-NODE_ENV=production
-# URL_PUBLIC=http://\$NGINX_SERVER_NAME/directus # Sera géré par Nginx Reverse Proxy
-EOF
+        # Utiliser printf pour construire le fichier .env de manière plus robuste
+        printf "DB_CLIENT=\"%s\"\n" "\$DB_CLIENT" > \"$DIRECTUS_INSTALL_PATH/.env\"
+        printf "DB_HOST=\"%s\"\n" "\$DB_HOST" >> \"$DIRECTUS_INSTALL_PATH/.env\"
+        printf "DB_PORT=\"%s\"\n" "\$DB_PORT" >> \"$DIRECTUS_INSTALL_PATH/.env\"
+        printf "DB_USER=\"%s\"\n" "\$DB_USER" >> \"$DIRECTUS_INSTALL_PATH/.env\"
+        printf "DB_PASSWORD=\"%s\"\n" "\$DB_PASSWORD" >> \"$DIRECTUS_INSTALL_PATH/.env\"
+        printf "DB_DATABASE=\"%s\"\n" "\$DB_DATABASE" >> \"$DIRECTUS_INSTALL_PATH/.env\"
+        printf "ADMIN_EMAIL=\"%s\"\n" "\$ADMIN_EMAIL" >> \"$DIRECTUS_INSTALL_PATH/.env\"
+        printf "ADMIN_PASSWORD=\"%s\"\n" "\$ADMIN_PASSWORD" >> \"$DIRECTUS_INSTALL_PATH/.env\"
+        printf "KEY=\"%s\"\n" "\$KEY" >> \"$DIRECTUS_INSTALL_PATH/.env\"
+        printf "SECRET=\"%s\"\n" "\$SECRET" >> \"$DIRECTUS_INSTALL_PATH/.env\"
+        printf "PORT=%s\n" "$DIRECTUS_PORT" >> \"$DIRECTUS_INSTALL_PATH/.env\"
+        printf "NODE_ENV=production\n" >> \"$DIRECTUS_INSTALL_PATH/.env\"
+        # printf "URL_PUBLIC=http://%s/directus\n" "\$NGINX_SERVER_NAME" >> \"$DIRECTUS_INSTALL_PATH/.env\" # Commenté comme dans votre script
+
         echo 'Fichier .env de Directus créé.'
         check_status \"L'initialisation/bootstrap de Directus a échoué.\" \"Projet Directus initialisé et configuré.\"
     else
@@ -513,6 +533,8 @@ EOF
     fi
 " || exit_on_error "Échec de l'installation/configuration de Directus en tant que $DIRECTUS_RUN_USER."
 check_status "L'installation de Directus a échoué." "Projet Directus créé et configuré."
+
+# ... (Reste du script) ...
 
 echo "Autorisation du port Directus ($DIRECTUS_PORT) sur UFW..."
 if ! ufw status | grep -q "$DIRECTUS_PORT"; then
