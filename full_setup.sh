@@ -83,8 +83,8 @@ apt upgrade -y || exit_on_error "Échec de la mise à niveau des paquets."
 apt autoremove -y || exit_on_error "Échec de la suppression des paquets inutiles."
 check_status "La mise à jour du système a échoué." "Mise à jour du système terminée."
 
-echo "Installation des outils nécessaires (curl, git, rsync, ufw, openssl, expect)..."
-for pkg in curl git rsync ufw openssl expect; do
+echo "Installation des outils nécessaires (curl, git, rsync, ufw, openssl, expect, dos2unix)..."
+for pkg in curl git rsync ufw openssl expect dos2unix; do
     if ! dpkg -s "$pkg" &>/dev/null; then
         echo "$pkg n'est pas installé. Installation de $pkg..."
         apt install -y "$pkg" || exit_on_error "Échec de l'installation de $pkg."
@@ -273,54 +273,90 @@ systemctl start mysql || exit_on_error "Échec du démarrage de MySQL."
 check_status "Le démarrage de MySQL a échoué." "MySQL Server démarré."
 
 echo "Exécution de 'mysql_secure_installation' de manière automatisée..."
-# Tester si le root MySQL a déjà un mot de passe
-MYSQL_ROOT_HAS_PASSWORD=$(mysql -u root -e "SELECT 1;" 2>&1 | grep -q "Access denied for user 'root'@'localhost' using password")
 
-if [ "$MYSQL_ROOT_HAS_PASSWORD" == "0" ]; then
-    echo "Le mot de passe root MySQL semble déjà défini. Veuillez le saisir pour mysql_secure_installation."
-    get_password "Veuillez entrer le mot de passe root MySQL actuel" MYSQL_ROOT_PASSWORD
-    mysql_secure_installation_command="mysql_secure_installation -p$MYSQL_ROOT_PASSWORD"
-else
-    echo "Le mot de passe root MySQL semble vide. Procédure sans mot de passe initial."
-    mysql_secure_installation_command="mysql_secure_installation"
-    echo "Définition d'un mot de passe temporaire pour root MySQL pour la configuration ultérieure."
-    get_password "Veuillez définir un nouveau mot de passe pour l'utilisateur root MySQL" MYSQL_ROOT_PASSWORD
-    mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD';" || exit_on_error "Échec de la définition du mot de passe root MySQL."
-    check_status "La définition du mot de passe root MySQL a échoué." "Mot de passe root MySQL défini."
+# Vérifier si expect est installé (déjà fait au début du script, mais pour la robustesse ici)
+if ! command -v expect &> /dev/null
+then
+    echo "expect n'est pas installé. Installation en cours..."
+    sudo apt install -y expect || exit_on_error "Échec de l'installation de expect."
 fi
 
-expect -c "
+# Demander le mot de passe root MySQL si l'utilisateur ne l'a pas déjà défini
+# Tester si le root MySQL a déjà un mot de passe
+MYSQL_ROOT_HAS_PASSWORD=false
+if mysql -u root -p"" -e "exit" 2>/dev/null; then
+    echo "Connexion MySQL root sans mot de passe réussie, on suppose qu'il n'y a pas de mot de passe root initial."
+    MYSQL_ROOT_PASSWORD="" # Laisser vide pour que expect gère l'invite initiale
+else
+    # Demander le mot de passe s'il est déjà défini
+    echo "Il semble que l'utilisateur root MySQL ait déjà un mot de passe."
+    get_password "Veuillez entrer le mot de passe actuel de l'utilisateur root MySQL (laissez vide si vous ne savez pas ou si c'est une première installation)" MYSQL_ROOT_PASSWORD
+    MYSQL_ROOT_HAS_PASSWORD=true
+fi
+
+# Utilisation de expect pour automatiser mysql_secure_installation
+sudo expect <<EOF
 set timeout 10
-spawn $mysql_secure_installation_command
+spawn mysql_secure_installation
 
-# Gestion de la demande du mot de passe si elle apparait pour l'ancienne version de mysql_secure_installation
-# expect {
-#   \"Enter password for user root:\" { send \"$MYSQL_ROOT_PASSWORD\r\" }
-#   \"Would you like to setup VALIDATE PASSWORD component?\" { send \"n\r\" }
-# }
-
-# Les nouvelles versions ne demandent plus l'ancien mot de passe ici si il est passé en ligne de commande
-expect \"Would you like to setup VALIDATE PASSWORD component?\"
-send \"n\r\"
-
-expect \"Change the root password?\"
-send \"n\r\"
-
-expect \"Remove anonymous users?\"
-send \"y\r\"
-
-expect \"Disallow root login remotely?\"
-send \"y\r\"
-
-expect \"Remove test database and access to it?\"
-send \"y\r\"
-
-expect \"Reload privilege tables now?\"
-send \"y\r\"
-
+# Handle the initial password prompt (might be empty if new install or if a password was just set)
+expect {
+    "Enter current password for root (enter for none):" {
+        send "$MYSQL_ROOT_PASSWORD\r"
+        exp_continue
+    }
+    "Would you like to setup VALIDATE PASSWORD component?" {
+        send "n\r" ; # No to VALIDATE PASSWORD component
+        exp_continue
+    }
+    "Change the root password?" {
+        if { "$MYSQL_ROOT_HAS_PASSWORD" == "true" } {
+            send "n\r" ; # No, if it was just entered
+        } else {
+            send "y\r" ; # Yes, if it's a new install and needs setting
+            expect "New password:"
+            send "$MYSQL_ROOT_PASSWORD\r"
+            expect "Re-enter new password:"
+            send "$MYSQL_ROOT_PASSWORD\r"
+            expect "Remove anonymous users?" # Continue after setting password
+        }
+        exp_continue
+    }
+    "Do you wish to continue with the password provided?" { # MySQL 8 prompt after password validation
+        send "y\r"
+        exp_continue
+    }
+    "Remove anonymous users?" {
+        send "y\r"
+        exp_continue
+    }
+    "Disallow root login remotely?" {
+        send "y\r"
+        exp_continue
+    }
+    "Remove test database and access to it?" {
+        send "y\r"
+        exp_continue
+    }
+    "Reload privilege tables now?" {
+        send "y\r"
+        exp_continue
+    }
+    eof {
+        # End of file, script finished
+    }
+}
 expect eof
-" || exit_on_error "Échec de l'automatisation de mysql_secure_installation. Veuillez le lancer manuellement si des erreurs persistent."
+EOF
+
+if [ $? -eq 0 ]; then
+    echo "Configuration MySQL sécurisée terminée."
+else
+    echo "Erreur lors de la configuration sécurisée de MySQL. Veuillez vérifier manuellement."
+    exit_on_error "mysql_secure_installation a échoué."
+fi
 check_status "L'automatisation de mysql_secure_installation a échoué." "mysql_secure_installation automatisé avec succès."
+
 
 echo "Configuration de l'utilisateur et de la base de données MySQL pour Directus..."
 
@@ -656,7 +692,7 @@ echo "  - Le service Directus est démarré et s'exécutera automatiquement au b
 echo "    exécuté par l'utilisateur système '$DIRECTUS_RUN_USER'."
 echo "  - Nginx est configuré en reverse proxy. Votre Directus est accessible via :"
 echo "    \e[1mhttp://$NGINX_SERVER_NAME/directus\e[0m"
-echo "  - Les identifiants Directus Admin sont: Email: $DIRECTUS_ADMIN_EMAIL, Mot de passe: $DIRECTUS_ADMIN_PASSWORD"
+echo "  - Les identifiants Directus Admin sont: Email: \$DIRECTUS_ADMIN_EMAIL_INNER (demandé pendant l'installation), Mot de passe: \$DIRECTUS_ADMIN_PASSWORD_INNER (demandé pendant l'installation)"
 echo -e "\n\e[31mIMPORTANT: Changez IMMÉDIATEMENT les mots de passe par défaut pour MySQL et Directus en production !\e[0m"
 echo "  Pour MySQL : mysql -u $MYSQL_USER -p"
 echo "  Pour Directus : Connectez-vous à l'admin et modifiez le mot de passe."
